@@ -4,6 +4,9 @@ from selenium.webdriver.common.by import By
 import time
 from datetime import datetime
 import re
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 
 def init_webdriver():
     options = webdriver.ChromeOptions()
@@ -11,6 +14,7 @@ def init_webdriver():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
     options.add_argument("--disable-cache")
+    options.add_argument("--incognito") 
     
     driver = webdriver.Chrome(options=options)
     
@@ -31,7 +35,6 @@ def search_data(name, url):
     try:
         driver = init_webdriver()  
         driver.get(url)
-        driver.maximize_window()
         time.sleep(8)
 
         table_search = driver.find_element(By.CLASS_NAME, 'container-numeral-table') 
@@ -90,29 +93,48 @@ def process_weather_data(input_text):
             continue
         
         if 'date' in current_day:
+            # Температура
             if '..' in line and 'temperature' not in current_day:
                 current_day['temperature'] = line.replace('+', '')
             
+            # Ветер (полный формат с направлением)
             elif ' - ' in line and '(' in line and ')' in line and 'wind' not in current_day:
                 current_day['wind'] = line
             
+            # Направление ветра (отдельно стоящие 1-3 символа)
             elif len(line) <= 3 and line not in ['падает', 'растёт'] and 'wind_dir' not in current_day:
-                current_day['wind_dir'] = line
+                # Проверяем что это действительно направление ветра (С, Ю, З, В или их комбинации)
+                wind_dirs = ['С', 'Ю', 'З', 'В', 'С-3', 'Ю-3', '3', 'С-В', 'Ю-З', 'С-З', 'Ю-В']
+                if any(wind_dir in line for wind_dir in wind_dirs):
+                    current_day['wind_dir'] = line
             
+            # Погодные явления
             elif not any(char.isdigit() for char in line) and len(line) > 3 and 'weather' not in current_day:
                 current_day['weather'] = line.lower()
             
-            elif re.match(r'^\d\s*\d{3}$', line.replace(' ', '')) and 'pressure' not in current_day:
+            # Давление (4 цифры)
+            elif re.match(r'^\d{3,4}$', line.replace(' ', '')) and 'pressure' not in current_day:
                 current_day['pressure'] = line.replace(' ', '')
             
+            # Тренд давления
             elif line in ['падает', 'растёт'] and 'pressure_trend' not in current_day:
                 current_day['pressure_trend'] = line
             
+            # Влажность
             elif ' - ' in line and any(char.isdigit() for char in line) and 'humidity' not in current_day:
                 current_day['humidity'] = line.replace(' ', '')
             
+            # Осадки
             elif re.match(r'^\d+(\.\d+)?$', line) and 'precipitation' not in current_day:
                 current_day['precipitation'] = line
+                
+                # Добавляем давление с трендом если они были
+                if 'pressure' in current_day and 'pressure_trend' in current_day:
+                    current_day['pressure'] = f"{current_day['pressure']} {current_day['pressure_trend']}"
+                
+                # Добавляем ветер с направлением если они были
+                if 'wind' in current_day and 'wind_dir' in current_day:
+                    current_day['wind'] = f"{current_day['wind']} {current_day['wind_dir']}"
                 
                 processed_days.append(current_day)
                 current_day = {}
@@ -120,6 +142,11 @@ def process_weather_data(input_text):
         i += 1
 
     if current_day:
+        # Обрабатываем последний день
+        if 'pressure' in current_day and 'pressure_trend' in current_day:
+            current_day['pressure'] = f"{current_day['pressure']} {current_day['pressure_trend']}"
+        if 'wind' in current_day and 'wind_dir' in current_day:
+            current_day['wind'] = f"{current_day['wind']} {current_day['wind_dir']}"
         processed_days.append(current_day)
     
     return processed_days
@@ -128,13 +155,14 @@ def format_output(data_list):
     formatted_lines = []
     
     for day_data in data_list:
-
+        pressure = day_data.get('pressure', '')
+        
         line_parts = [
             day_data.get('date', ''),
             day_data.get('temperature', ''),      
             day_data.get('weather', ''),          
             day_data.get('wind', ''),             
-            day_data.get('pressure', ''),         
+            pressure,         
             day_data.get('humidity', ''),         
             day_data.get('precipitation', '')     
         ]
@@ -151,3 +179,4 @@ search_data("Витебск", "https://pogoda.by/weather/numerical-weather-day/2
 search_data("Гомель", "https://pogoda.by/weather/numerical-weather-day/33041")
 search_data("Гродно", "https://pogoda.by/weather/numerical-weather-day/26820")
 search_data("Могилев", "https://pogoda.by/weather/numerical-weather-day/26862")
+
