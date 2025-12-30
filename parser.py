@@ -280,25 +280,6 @@ def save_weather_to_db(city_name, weather_data):
             conn.close()
 
 
-def clean_old_data():
-    """Очистка старых данных (старше 7 дней)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("EXEC CleanOldWeatherData @days_to_keep = 7")
-        conn.commit()
-        
-        print("\n🧹 Очищены данные старше 7 дней")
-        
-    except Exception as e:
-        print(f"⚠️ Ошибка очистки старых данных: {e}")
-    finally:
-        if conn:
-            cursor.close()
-            conn.close()
-
-
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def search_data(name, url):
     """Сбор и сохранение данных"""
@@ -306,7 +287,7 @@ def search_data(name, url):
     try:
         driver = init_webdriver()  
         driver.get(url)
-        time.sleep(8)
+        time.sleep(10)
 
         table_search = driver.find_element(By.CLASS_NAME, 'container-numeral-table') 
         tbody = table_search.find_element(By.TAG_NAME, "tbody")
@@ -351,8 +332,6 @@ if __name__ == "__main__":
     search_data("Гродно", "https://pogoda.by/weather/numerical-weather-day/26820")
     search_data("Могилев", "https://pogoda.by/weather/numerical-weather-day/26862")
     
-    # Очистка старых данных
-    clean_old_data()
     
     print("\n" + "=" * 60)
     print("✅ ВСЕ ДАННЫЕ СОБРАНЫ И СОХРАНЕНЫ В БД")
