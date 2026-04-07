@@ -16,16 +16,6 @@ DB_CONFIG = {
     'driver': 'ODBC Driver 17 for SQL Server'
 }
 
-CITIES = {
-    "Минск": {"id": 26851},
-    "Брест": {"id": 33008},
-    "Витебск": {"id": 26666},
-    "Гомель": {"id": 33041},
-    "Гродно": {"id": 26820},
-    "Могилев": {"id": 26862}
-}
-
-
 # ==================== БАЗОВЫЕ ФУНКЦИИ ====================
 def get_db_connection():
     """Подключение к БД"""
@@ -64,7 +54,7 @@ def init_webdriver():
 
 # ==================== ПАРСИНГ ДАННЫХ ====================
 def process_weather_data(input_text):
-    """Обработка погодных данных в нужный формат"""
+    """Обработка погодных данных в нужный формат для weather_new"""
     
     lines = [line.strip() for line in input_text.strip().split('\n') if line.strip()]
     
@@ -93,77 +83,71 @@ def process_weather_data(input_text):
             continue
         
         if 'date' in current_day:
-            # Температура (формат: -5..-4)
-            if '..' in line and 'temperature' not in current_day:
-                current_day['temperature'] = line.replace('+', '')
+            # Температура
+            if '..' in line and 'temperature_min' not in current_day:
+                temp_clean = line.replace('+', '')
+                temp_parts = temp_clean.split('..')
+                if len(temp_parts) == 2:
+                    current_day['temperature_min'] = temp_parts[0].strip()
+                    current_day['temperature_max'] = temp_parts[1].strip()
+
+            # Погодные явления (пропускаем)
+            elif line in ['Продолжительные осадки', 'Кратковременные осадки', 'Облачно', 'Временами осадки']:
+                pass
             
-            # Ветер (упрощенная проверка - если есть " - " или "(")
-            elif (' - ' in line or '(' in line) and 'wind' not in current_day:
-                # Проверяем что это не влажность (в влажности тоже есть " - ")
-                if not any(char.isdigit() for char in line.replace(' ', '').replace('-', '')):
-                    # Если нет цифр, это не ветер
-                    pass
-                else:
-                    current_day['wind'] = line
+            # Ветер и порывы
+            elif '-' in line and 'м/с' not in line and '(' in line and 'wind_min' not in current_day:
+                wind_match = re.search(r'(\d+)\s*-\s*(\d+)\s*\((\d+)\)', line)
+                if wind_match:
+                    current_day['wind_min'] = wind_match.group(1)
+                    current_day['wind_max'] = wind_match.group(2)
+                    current_day['gusts_of_wind'] = wind_match.group(3)
+
+            # Давление (1 006)
+            elif re.match(r'^\d+\s+\d+$', line) and 'pressure' not in current_day:
+                pressure_clean = line.replace(' ', '')
+                current_day['pressure'] = pressure_clean
             
-            elif len(line) <= 3 and line not in ['падает', 'растёт'] and 'wind_dir' not in current_day:
-                wind_dirs = ['С', 'Ю', 'З', 'В', 'С-3', 'Ю-3', '3', 'С-В', 'Ю-З', 'С-З', 'Ю-В']
-                if any(wind_dir in line for wind_dir in wind_dirs):
-                    current_day['wind_dir'] = line
+            # Направление ветра (пропускаем)
+            elif line in ['С-З', 'С', 'В', 'Ю-З', 'Ю-В', 'З']:
+                pass
             
-            elif (not any(char.isdigit() for char in line) or 
-                  ('вот тут' in line)) and len(line) > 3 and 'weather' not in current_day:
-                wind_dirs = ['С', 'Ю', 'З', 'В', 'С-3', 'Ю-3', '3', 'С-В', 'Ю-З', 'С-З', 'Ю-В']
-                if not any(wind_dir in line for wind_dir in wind_dirs):
-                    current_day['weather'] = line.lower()
+            # Давление и тренд (пропускаем)
+            elif re.match(r'^\d{1,2}\s\d{3}$', line) or line in ['растёт', 'падает', 'не измен.']:
+                pass
+
+            # Влажность
+            elif re.match(r'^\d+\s*-\s*\d+$', line) and 'humidity_min' not in current_day:
+                humidity_parts = re.split(r'\s*-\s*', line)
+                if len(humidity_parts) == 2:
+                    current_day['humidity_min'] = humidity_parts[0].strip()
+                    current_day['humidity_max'] = humidity_parts[1].strip()
             
-            elif re.match(r'^\d{3,4}$', line.replace(' ', '')) and 'pressure' not in current_day:
-                current_day['pressure'] = line.replace(' ', '')
-            
-            elif line in ['падает', 'растёт'] and 'pressure_trend' not in current_day:
-                current_day['pressure_trend'] = line
-            
-            elif re.match(r'^\d+-\d+$', line.replace(' ', '')) and 'humidity' not in current_day:
-                current_day['humidity'] = line.replace(' ', '')
-            
+            # Осадки
             elif re.match(r'^\d+(\.\d+)?$', line) and 'precipitation' not in current_day:
                 current_day['precipitation'] = line
-                
-                if 'pressure' in current_day and 'pressure_trend' in current_day:
-                    current_day['pressure'] = f"{current_day['pressure']} {current_day['pressure_trend']}"
-  
-                if 'wind' in current_day and 'wind_dir' in current_day:
-                    current_day['wind'] = f"{current_day['wind']} {current_day['wind_dir']}"
-                
                 processed_days.append(current_day)
                 current_day = {}
         
         i += 1
 
-    if current_day:
-        if 'pressure' in current_day and 'pressure_trend' in current_day:
-            current_day['pressure'] = f"{current_day['pressure']} {current_day['pressure_trend']}"
-        if 'wind' in current_day and 'wind_dir' in current_day:
-            current_day['wind'] = f"{current_day['wind']} {current_day['wind_dir']}"
-        processed_days.append(current_day)
-    
     return processed_days
-
 
 def format_output(data_list):
     formatted_lines = []
     
     for day_data in data_list:
-        pressure = day_data.get('pressure', '')
-        
         line_parts = [
             day_data.get('date', ''),
-            day_data.get('temperature', ''),      
-            day_data.get('weather', ''),          
-            day_data.get('wind', ''),             
-            pressure,         
-            day_data.get('humidity', ''),         
-            day_data.get('precipitation', '')     
+            day_data.get('temperature_min', ''),      
+            day_data.get('temperature_max', ''),  
+            day_data.get('humidity_min', ''),    
+            day_data.get('humidity_max', ''),
+            day_data.get('precipitation', ''),
+            day_data.get('wind_min', ''),
+            day_data.get('wind_max', ''), 
+            day_data.get('gusts_of_wind', ''),
+            day_data.get('pressure', '')  
         ]
                 
         formatted_line = '|'.join(line_parts)
@@ -208,32 +192,24 @@ def save_weather_to_db(city_name, weather_data):
             
             dates_to_delete.append(db_date)
 
-            temperature = day.get('temperature', '')
-            humidity = day.get('humidity', '')
-            precipitation = day.get('precipitation', '')
-            wind = day.get('wind', '')
-
-            condition_parts = []
-            if 'weather' in day:
-                condition_parts.append(day['weather'])
-            if 'pressure' in day:
-                condition_parts.append(f"давление: {day['pressure']}")
-            condition = ", ".join(condition_parts)
-            
             data_to_insert.append((
                 region_id,
                 db_date,
-                str(temperature) if temperature else None,
-                str(humidity) if humidity else None,
-                str(precipitation) if precipitation else None,
-                str(wind) if wind else None,
-                condition[:1000] if condition else None
+                day.get('temperature_min', ''),
+                day.get('temperature_max', ''),
+                day.get('humidity_min', ''),
+                day.get('humidity_max', ''),
+                day.get('precipitation', ''),
+                day.get('wind_min', ''),
+                day.get('wind_max', ''),
+                day.get('gusts_of_wind', ''),
+                day.get('pressure', '')  
             ))
 
         if dates_to_delete:
             placeholders = ','.join(['?'] * len(dates_to_delete))
             delete_sql = f"""
-                DELETE FROM weather 
+                DELETE FROM weather_new
                 WHERE region_id = ? 
                 AND date IN ({placeholders})
             """
@@ -242,9 +218,11 @@ def save_weather_to_db(city_name, weather_data):
         
         if data_to_insert:
             insert_sql = """
-                INSERT INTO weather 
-                (region_id, date, temperature, humidity, precipitation, wind, condition)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO weather_new
+                (region_id, date, temperature_min, temperature_max, 
+                 humidity_min, humidity_max, precipitation, 
+                 wind_min, wind_max, gusts_of_wind, pressure)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.executemany(insert_sql, data_to_insert)
             print(f"Вставлено новых записей: {len(data_to_insert)}")
@@ -261,7 +239,6 @@ def save_weather_to_db(city_name, weather_data):
             cursor.close()
             conn.close()
 
-
 # ==================== ОСНОВНАЯ ФУНКЦИЯ ====================
 def search_data(name, url):
     driver = None  
@@ -275,7 +252,7 @@ def search_data(name, url):
 
         dataCity = tbody.find_elements(By.TAG_NAME, "tr")
 
-        all_text_city = ""
+        all_text_city = "" 
         for d in dataCity:
             all_text_city += d.text + "\n"
 
@@ -309,7 +286,6 @@ if __name__ == "__main__":
     search_data("Гомель", "https://pogoda.by/weather/numerical-weather-day/33041")
     search_data("Гродно", "https://pogoda.by/weather/numerical-weather-day/26820")
     search_data("Могилев", "https://pogoda.by/weather/numerical-weather-day/26862")
-    
     
     print("\n" + "=" * 60)
     print("ВСЕ!")
